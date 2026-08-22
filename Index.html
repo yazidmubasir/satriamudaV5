@@ -191,13 +191,27 @@ function buildSidebar(){
   }
   html += grp('Menu');
   sb.innerHTML = html;
-  call('getMenusForUser',[TOKEN]).then(menus=>{
+  const modulesPromise = USER.role === 'siswa' ? call('getModulesForUser',[TOKEN]) : Promise.resolve([]);
+  Promise.all([call('getMenusForUser',[TOKEN]), modulesPromise]).then(([menus, modules])=>{
     let dyn = '';
     menus.forEach(m=>{
       dyn += `<div class="item" onclick="viewDynamicMenu('${m.menu_id}')">${m.icon||'📄'} ${m.nama_menu}</div>`;
     });
+    window.__studentModuleSheets = [];
+    modules.forEach(m=>{
+      dyn += grp(m.nama_modul);
+      (m.sheets || []).forEach(s=>{
+        const index = window.__studentModuleSheets.length;
+        window.__studentModuleSheets.push({
+          spreadsheetId: USER.spreadsheet_id,
+          sheetName: s.sheet_name,
+          title: m.nama_modul + ' - ' + (s.title || s.sheet_name)
+        });
+        dyn += item(s.title || s.sheet_name, `viewStudentModule(${index})`);
+      });
+    });
     sb.innerHTML += dyn;
-  });
+  }).catch(e=>toast(e.message||String(e), true));
   if(Object.keys(document.getElementById('content').dataset).length === 0){
     document.getElementById('content').innerHTML = `<div class="card"><h2 class="page-title">Selamat datang, ${USER.nama||USER.username}</h2><p class="muted">Silakan pilih menu di sebelah kiri.</p></div>`;
   }
@@ -447,12 +461,19 @@ function viewKelasSheetData(spreadsheetId, sheetName, title){
     const cols = headers.map(h=>({key:h,label:h}));
     renderGenericCrud({
       title: title || sheetName, columns: cols, pkField:'__row',
+      readOnly: USER.role === 'siswa',
       load: ()=> call('getSheetDataFn',[TOKEN, spreadsheetId, sheetName]),
       onAdd: (obj)=> call('addRowToSheet',[TOKEN, spreadsheetId, sheetName, obj]),
       onUpdate: (pk,obj)=> call('updateRowInSheet',[TOKEN, spreadsheetId, sheetName, pk, obj]),
       onDelete: (pk)=> call('deleteRowFromSheet',[TOKEN, spreadsheetId, sheetName, pk])
     });
   }).catch(e=>toast(e.message||String(e), true));
+}
+
+function viewStudentModule(index){
+  const moduleSheet = (window.__studentModuleSheets || [])[index];
+  if(!moduleSheet){ toast('Modul tidak ditemukan', true); return; }
+  viewKelasSheetData(moduleSheet.spreadsheetId, moduleSheet.sheetName, moduleSheet.title);
 }
 
 // ============================================================
