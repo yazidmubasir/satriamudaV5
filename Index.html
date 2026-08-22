@@ -25,20 +25,34 @@
   #app{display:none;min-height:100vh;}
   #topbar{display:flex;justify-content:space-between;align-items:center;background:var(--primary-dark);color:#fff;padding:10px 20px;}
   #topbar .role-badge{background:#ffffff22;padding:3px 10px;border-radius:20px;font-size:12px;margin-left:8px;}
-  #layout{display:flex;}
+  #layout{display:flex;min-height:calc(100vh - 48px);}
   #sidebar{width:230px;background:#fff;min-height:calc(100vh - 48px);border-right:1px solid var(--border);padding:14px 0;}
   #sidebar .item{padding:10px 20px;cursor:pointer;font-size:14px;color:var(--text);border-left:3px solid transparent;}
   #sidebar .item:hover{background:#f0f4f2;}
   #sidebar .item.active{border-left-color:var(--primary);background:#eef6f1;font-weight:600;color:var(--primary-dark);}
   #sidebar .group-title{padding:14px 20px 4px;font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;}
-  #content{flex:1;padding:22px;max-width:1100px;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
-  h2.page-title{margin-top:0;color:var(--primary-dark);}
-  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;}
-  th,td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;}
-  th{background:#f7f9f8;color:var(--muted);font-size:12px;text-transform:uppercase;}
-  tr:hover{background:#fafcfb;}
+  #content{flex:1;min-width:0;padding:28px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:16px;box-shadow:0 4px 18px rgba(35,79,57,.04);}
+  .data-card{overflow:hidden;}
+  .module-card{border-top:4px solid var(--primary);}
+  .page-heading{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px;}
+  .eyebrow{color:var(--primary);font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px;}
+  h2.page-title{margin:0;color:var(--primary-dark);font-size:27px;line-height:1.2;}
+  .page-note{margin:7px 0 0;max-width:760px;line-height:1.5;}
+  .record-count{background:#eef6f1;color:var(--primary-dark);border-radius:999px;padding:6px 11px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .crud-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;}
+  .toolbar-hint{color:var(--muted);font-size:12px;}
+  .table-scroll{width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:10px;}
+  table{width:100%;min-width:720px;border-collapse:collapse;font-size:13px;margin:0;}
+  th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;white-space:nowrap;}
+  th{background:#f7f9f8;color:var(--muted);font-size:11px;letter-spacing:.35px;text-transform:uppercase;position:sticky;top:0;z-index:1;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fafcfb;}
+  .actions{white-space:nowrap;}
   .actions button{margin-right:4px;}
+  .empty-state,.loading-state{padding:34px 18px;text-align:center;color:var(--muted);}
+  .empty-state .empty-icon,.loading-state .loading-icon{font-size:28px;display:block;margin-bottom:8px;}
+  .empty-state strong{display:block;color:var(--text);margin-bottom:4px;}
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);align-items:center;justify-content:center;z-index:50;}
   .modal-box{background:#fff;border-radius:10px;padding:22px;width:440px;max-height:85vh;overflow:auto;}
   .modal-box h3{margin-top:0;}
@@ -51,6 +65,22 @@
   .muted{color:var(--muted);font-size:12px;}
   .flexrow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
   .flexrow > div{flex:1;min-width:160px;}
+  @media(max-width:760px){
+    #topbar{padding:10px 12px;gap:8px;}
+    #topbar .role-badge{display:inline-block;}
+    #topbar button{padding:5px 8px;font-size:11px;}
+    #layout{display:block;}
+    #sidebar{width:100%;min-height:0;border-right:0;border-bottom:1px solid var(--border);padding:8px 0;display:flex;overflow-x:auto;gap:4px;}
+    #sidebar .group-title{display:none;}
+    #sidebar .item{white-space:nowrap;border-left:0;border-bottom:3px solid transparent;padding:9px 12px;}
+    #sidebar .item.active{border-bottom-color:var(--primary);}
+    #content{padding:14px;}
+    .card{padding:16px;border-radius:12px;}
+    .page-heading{display:block;}
+    .record-count{display:inline-block;margin-top:10px;}
+    .crud-toolbar{align-items:flex-start;flex-direction:column;}
+    h2.page-title{font-size:23px;}
+  }
 </style>
 </head>
 <body>
@@ -191,13 +221,27 @@ function buildSidebar(){
   }
   html += grp('Menu');
   sb.innerHTML = html;
-  call('getMenusForUser',[TOKEN]).then(menus=>{
+  const modulesPromise = USER.role === 'siswa' ? call('getModulesForUser',[TOKEN]) : Promise.resolve([]);
+  Promise.all([call('getMenusForUser',[TOKEN]), modulesPromise]).then(([menus, modules])=>{
     let dyn = '';
     menus.forEach(m=>{
       dyn += `<div class="item" onclick="viewDynamicMenu('${m.menu_id}')">${m.icon||'📄'} ${m.nama_menu}</div>`;
     });
+    window.__studentModuleSheets = [];
+    modules.forEach(m=>{
+      dyn += grp(m.nama_modul);
+      (m.sheets || []).forEach(s=>{
+        const index = window.__studentModuleSheets.length;
+        window.__studentModuleSheets.push({
+          spreadsheetId: USER.spreadsheet_id,
+          sheetName: s.sheet_name,
+          title: m.nama_modul + ' - ' + (s.title || s.sheet_name)
+        });
+        dyn += item(s.title || s.sheet_name, `viewStudentModule(${index})`);
+      });
+    });
     sb.innerHTML += dyn;
-  });
+  }).catch(e=>toast(e.message||String(e), true));
   if(Object.keys(document.getElementById('content').dataset).length === 0){
     document.getElementById('content').innerHTML = `<div class="card"><h2 class="page-title">Selamat datang, ${USER.nama||USER.username}</h2><p class="muted">Silakan pilih menu di sebelah kiri.</p></div>`;
   }
@@ -221,11 +265,20 @@ function setActive(el){
 function renderGenericCrud(config){
   const content = document.getElementById('content');
   content.innerHTML = `
-    <div class="card">
-      <h2 class="page-title">${config.title}</h2>
-      ${config.note ? `<p class="muted">${config.note}</p>` : ''}
-      ${config.readOnly ? '' : `<button onclick='openCrudForm(${JSON.stringify(config.columns).replace(/'/g,"&#39;")}, null)'>+ Tambah Data</button>`}
-      <div id="crud-table-wrap"><p class="muted">Memuat data...</p></div>
+    <div class="card data-card ${config.module ? 'module-card' : ''}">
+      <div class="page-heading">
+        <div>
+          <div class="eyebrow">${config.module ? 'Modul Kegiatan' : 'Data Sistem'}</div>
+          <h2 class="page-title">${config.title}</h2>
+          ${config.note ? `<p class="muted page-note">${config.note}</p>` : ''}
+        </div>
+        <div class="record-count" id="crud-count">Memuat...</div>
+      </div>
+      <div class="crud-toolbar">
+        <div class="toolbar-hint">${config.readOnly ? 'Mode baca-saja' : 'Kelola data dengan aman dan teratur'}</div>
+        ${config.readOnly ? '' : `<button onclick='openCrudForm(${JSON.stringify(config.columns).replace(/'/g,"&#39;")}, null)'>＋ Tambah Data</button>`}
+      </div>
+      <div class="table-scroll" id="crud-table-wrap"><div class="loading-state"><span class="loading-icon">⏳</span>Memuat data...</div></div>
     </div>
   `;
   window.__currentCrudConfig = config;
@@ -236,7 +289,12 @@ function renderGenericCrud(config){
 }
 function renderCrudTableRows(config, rows){
   const wrap = document.getElementById('crud-table-wrap');
-  if(!rows.length){ wrap.innerHTML = '<p class="muted">Belum ada data.</p>'; return; }
+  const count = document.getElementById('crud-count');
+  if(count) count.textContent = `${rows.length} data`;
+  if(!rows.length){
+    wrap.innerHTML = '<div class="empty-state"><span class="empty-icon">📭</span><strong>Belum ada data</strong><span>Data akan tampil di sini setelah tersedia.</span></div>';
+    return;
+  }
   let html = '<table><thead><tr>';
   config.columns.forEach(c=>{ if(c.type!=='password') html += `<th>${c.label}</th>`; });
   if(!config.readOnly) html += '<th>Aksi</th>';
@@ -247,7 +305,7 @@ function renderCrudTableRows(config, rows){
       if(c.type==='password') return;
       let v = r[c.key];
       if(v instanceof Date) v = v.toLocaleString();
-      html += `<td>${v!==undefined && v!==null ? v : ''}</td>`;
+      html += `<td>${escapeHtml(v!==undefined && v!==null ? String(v) : '')}</td>`;
     });
     if(!config.readOnly){
       html += `<td class="actions">
@@ -259,6 +317,11 @@ function renderCrudTableRows(config, rows){
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
+}
+function escapeHtml(value){
+  return value.replace(/[&<>'"]/g, function(ch){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+  });
 }
 function openCrudForm(columns, existing){
   const config = window.__currentCrudConfig;
@@ -446,13 +509,21 @@ function viewKelasSheetData(spreadsheetId, sheetName, title){
   call('getSheetHeadersFn',[TOKEN, spreadsheetId, sheetName]).then(headers=>{
     const cols = headers.map(h=>({key:h,label:h}));
     renderGenericCrud({
-      title: title || sheetName, columns: cols, pkField:'__row',
+      title: title || sheetName, columns: cols, pkField:'__row', module:true,
+      note: USER.role === 'siswa' ? 'Data modul ini hanya dapat dibaca.' : 'Kelola data kegiatan kelas melalui tabel di bawah.',
+      readOnly: USER.role === 'siswa',
       load: ()=> call('getSheetDataFn',[TOKEN, spreadsheetId, sheetName]),
       onAdd: (obj)=> call('addRowToSheet',[TOKEN, spreadsheetId, sheetName, obj]),
       onUpdate: (pk,obj)=> call('updateRowInSheet',[TOKEN, spreadsheetId, sheetName, pk, obj]),
       onDelete: (pk)=> call('deleteRowFromSheet',[TOKEN, spreadsheetId, sheetName, pk])
     });
   }).catch(e=>toast(e.message||String(e), true));
+}
+
+function viewStudentModule(index){
+  const moduleSheet = (window.__studentModuleSheets || [])[index];
+  if(!moduleSheet){ toast('Modul tidak ditemukan', true); return; }
+  viewKelasSheetData(moduleSheet.spreadsheetId, moduleSheet.sheetName, moduleSheet.title);
 }
 
 // ============================================================
