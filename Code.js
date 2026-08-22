@@ -113,6 +113,19 @@ function sheetToObjects(sh) {
   return out;
 }
 
+// google.script.run tidak dapat mengirim objek Date langsung ke browser.
+// Ubah nilai tanggal menjadi teks sebelum data dikembalikan ke frontend.
+function makeClientSafeRows(rows) {
+  return rows.map(function (row) {
+    var safe = {};
+    Object.keys(row).forEach(function (key) {
+      var value = row[key];
+      safe[key] = value instanceof Date ? value.toISOString() : value;
+    });
+    return safe;
+  });
+}
+
 // ================= BOOTSTRAP (poin 2) =================
 function runBootstrapFromEditor() {
   // Jalankan manual dari editor Apps Script (tanpa token) untuk setup pertama kali.
@@ -339,7 +352,7 @@ function getMasterList(token, sheetName) {
   requireAuth(token); // semua role login boleh baca (untuk kebutuhan menu), edit tetap dibatasi
   var ss = getMasterSS();
   var sh = ensureSheet(ss, sheetName, HEADERS[sheetName]);
-  var list = sheetToObjects(sh);
+  var list = makeClientSafeRows(sheetToObjects(sh));
   if (sheetName === SHEET_NAMES.USERS) {
     list.forEach(function (u) { delete u.password_hash; });
   }
