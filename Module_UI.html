@@ -200,7 +200,7 @@ function openCrudFormModal(existing) {
     
     // Auto fill data siswa
     if (!existing && USER.role === 'siswa') {
-      if (c.key === 'nis') val = USER.username;
+      if (c.key === 'nis') val = USER.nis || USER.username;
       if (c.key === 'nama_siswa' || c.key === 'nama') val = USER.nama;
     }
     if (!existing && c.key === 'tanggal' && !val) {
