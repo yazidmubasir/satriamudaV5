@@ -49,7 +49,7 @@ const MASTER_FIELD_CONFIG = {
       { key: 'nama_kelas', label: 'Nama Kelas' },
       { key: 'wali_kelas', label: 'Wali Kelas' },
       { key: 'spreadsheet_id', label: 'Spreadsheet ID' },
-      { key: 'admin_kelas_username', label: 'Admin Kelas' },
+      { key: 'admin_kelas_username', label: 'Admin Kelas', type: 'select', options: [] },
       { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
     ]
   },
@@ -66,14 +66,24 @@ const MASTER_FIELD_CONFIG = {
 
 function viewMasterCrud(sheetName) {
   const fc = MASTER_FIELD_CONFIG[sheetName];
-  renderGenericCrud({
+  const prepare = sheetName === 'master_kelas'
+    ? call('getMasterList', [TOKEN, 'master_users']).then(users => {
+        const adminOptions = users
+          .filter(u => u.role === 'admin_kelas' && u.status !== 'nonaktif')
+          .map(u => u.username);
+        const adminField = fc.columns.find(c => c.key === 'admin_kelas_username');
+        if (adminField) adminField.options = [''].concat(adminOptions);
+      })
+    : Promise.resolve();
+
+  prepare.then(() => renderGenericCrud({
     title: fc.title, note: fc.note, columns: fc.columns, pkField: fc.pkField,
     readOnly: USER.role !== 'owner',
     load: () => call('getMasterList', [TOKEN, sheetName]),
     onAdd: (obj) => call('addMasterRow', [TOKEN, sheetName, obj]),
     onUpdate: (pk, obj) => call('updateMasterRow', [TOKEN, sheetName, pk, obj]),
     onDelete: (pk) => call('deleteMasterRow', [TOKEN, sheetName, pk])
-  });
+  })).catch(e => toast(e.message || String(e), true));
 }
 
 function viewDynamicMenu(menuId) {
