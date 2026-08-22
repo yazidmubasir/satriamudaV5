@@ -1,0 +1,58 @@
+<div id="sidebar"></div>
+
+<script>
+function buildSidebar() {
+  const sb = document.getElementById('sidebar');
+  let html = '';
+
+  if (USER.role === 'owner') {
+    html += grp('Master Data');
+    html += item('👥 Master Users', "viewMasterCrud('master_users')");
+    html += item('👨‍🏫 Master Guru', "viewMasterCrud('master_guru')");
+    html += item('👔 Master Karyawan', "viewMasterCrud('master_karyawan')");
+    html += item('🏫 Master Kelas', "viewMasterCrud('master_kelas')");
+    html += item('📚 Master Mapel', "viewMasterCrud('master_mapel')");
+    html += grp('Pengaturan Sistem');
+    html += item('📌 Manajemen Menu', 'viewMenuManager()');
+    html += item('🧩 Modul Kegiatan (Builder)', 'viewModulManager()');
+    html += item('🔗 Admin Kelas & Spreadsheet', 'viewAdminKelasManager()');
+    html += item('🛠️ Sheet & Kolom per Kelas', 'viewSheetBuilder()');
+    html += grp('Laporan');
+    html += item('📊 Agregasi Semua Kelas', 'viewAggregasi()');
+  }
+
+  if (USER.role === 'admin_kelas') {
+    html += grp('Kelas Saya');
+    html += item('🎓 Data Siswa', 'viewSiswaManager()');
+    html += item('🚀 Aktivasi Modul Kegiatan', 'viewModulAktivasi()');
+    html += item('🛠️ Kelola Sheet & Kolom', 'viewSheetBuilder()');
+  }
+
+  html += grp('Menu Modul / Kegiatan');
+  sb.innerHTML = html;
+
+  call('getMenusForUser', [TOKEN]).then(menus => {
+    let dyn = '';
+    menus.forEach(m => {
+      dyn += `<div class="item" onclick="viewDynamicMenu('${m.menu_id}')">${m.icon || '📝'} ${m.nama_menu}</div>`;
+    });
+    sb.innerHTML += dyn;
+  });
+
+  if (!document.getElementById('content').innerHTML.trim()) {
+    document.getElementById('content').innerHTML = `
+      <div class="card">
+        <h2 class="page-title">👋 Selamat datang, ${USER.nama || USER.username}</h2>
+        <p class="muted">Silakan pilih menu di sebelah kiri untuk mengelola data atau mengisi modul kegiatan.</p>
+      </div>`;
+  }
+
+  function grp(t) { return `<div class="group-title">${t}</div>`; }
+  function item(label, onclick) { return `<div class="item" onclick="${onclick}; setActiveSidebar(this)">${label}</div>`; }
+}
+
+function setActiveSidebar(el) {
+  document.querySelectorAll('#sidebar .item').forEach(i => i.classList.remove('active'));
+  if (el) el.classList.add('active');
+}
+</script>
