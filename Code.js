@@ -310,6 +310,17 @@ function getMasterList(token, sheetName) {
   return list;
 }
 
+function validateAdminKelasUsername(username) {
+  if (!username) return;
+  var users = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.USERS, HEADERS.master_users));
+  var found = users.find(function (u) {
+    return String(u.username) === String(username) &&
+      String(u.role) === 'admin_kelas' &&
+      String(u.status || 'aktif') !== 'nonaktif';
+  });
+  if (!found) throw new Error('Admin Kelas harus berasal dari master_users dengan role admin_kelas yang aktif');
+}
+
 function addMasterRow(token, sheetName, obj) {
   requireOwner(token);
   var ss = getMasterSS();
@@ -322,6 +333,9 @@ function addMasterRow(token, sheetName, obj) {
     if (existing.some(function (r) { return String(r[pk]) === String(obj[pk]); })) {
       throw new Error('Data dengan ' + pk + ' tersebut sudah ada');
     }
+  }
+  if (sheetName === SHEET_NAMES.KELAS) {
+    validateAdminKelasUsername(obj.admin_kelas_username);
   }
   if (sheetName === SHEET_NAMES.USERS) {
     obj.password_hash = sha256(obj.password || '123456');
@@ -344,6 +358,10 @@ function updateMasterRowInternal(sheetName, pkValue, obj) {
   var pk = PK[sheetName];
   var data = sh.getDataRange().getValues();
   var pkIdx = headers.indexOf(pk);
+
+  if (sheetName === SHEET_NAMES.KELAS && obj.admin_kelas_username !== undefined) {
+    validateAdminKelasUsername(obj.admin_kelas_username);
+  }
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][pkIdx]) === String(pkValue)) {
