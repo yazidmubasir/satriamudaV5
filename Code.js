@@ -621,7 +621,7 @@ function deleteSiswa(token, spreadsheetId, rowNumber) {
 // ================= MODUL KEGIATAN (poin 19, 20, 21, 22) =================
 function listModulesAll(token) {
   requireOwner(token);
-  return sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MODUL, HEADERS.master_modul));
+  return makeClientSafeRows(sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MODUL, HEADERS.master_modul)));
 }
 
 function listModulesForActivation(token) {
@@ -647,7 +647,7 @@ function saveModul(token, modulId, namaModul, keterangan, templateArr, isNew) {
 
 function getActiveModulesForKelas(token, kodeKelas) {
   requireAuth(token);
-  var list = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MODUL_KELAS, HEADERS.master_modul_kelas));
+  var list = makeClientSafeRows(sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MODUL_KELAS, HEADERS.master_modul_kelas)));
   return list.filter(function (r) { return r.kode_kelas === kodeKelas; });
 }
 
