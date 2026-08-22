@@ -5,16 +5,99 @@
  */
 
 function checkSpreadsheetAccess(u, spreadsheetId) {
+  spreadsheetId = String(spreadsheetId || '');
+  if (!spreadsheetId) throw new Error('Spreadsheet tidak ditentukan');
   if (u.role === 'owner') return true;
-  if ((u.role === 'admin_kelas' || u.role === 'siswa') && u.spreadsheet_id === spreadsheetId) return true;
-  throw new Error('Akses ditolak ke spreadsheet ini');
+  if (u.role !== 'admin_kelas' && u.role !== 'siswa') {
+    throw new Error('Akses ditolak ke spreadsheet ini');
+  }
+
+  var kelas = getKelasForUser(u);
+  if (!kelas || String(kelas.spreadsheet_id) !== spreadsheetId) {
+    throw new Error('Akses ditolak: Anda hanya dapat mengakses spreadsheet kelas Anda');
+  }
+  // Selalu ambil identitas terbaru dari roster kelas, bukan data yang mungkin
+  // sudah lama tersimpan di sesi browser.
+  if (u.role === 'siswa') {
+    var student = getStudentForSession(u);
+    u.nis = student.nis || '';
+    u.nama = student.nama || '';
+  }
+  return true;
+}
+
+function getKelasForUser(u) {
+  if (!u || !u.kode_kelas || !u.spreadsheet_id) return null;
+  var kelasList = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.KELAS, HEADERS.master_kelas));
+  return kelasList.find(function (k) {
+    return String(k.kode_kelas) === String(u.kode_kelas) &&
+      String(k.spreadsheet_id) === String(u.spreadsheet_id) &&
+      (u.role !== 'admin_kelas' || String(k.admin_kelas_username || '') === String(u.username || '')) &&
+      String(k.status || 'aktif') !== 'nonaktif';
+  }) || null;
+}
+
+function requireAuthorizedKelas(u, kodeKelas) {
+  var kelasList = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.KELAS, HEADERS.master_kelas));
+  var kelas = kelasList.find(function (k) { return String(k.kode_kelas) === String(kodeKelas); });
+  if (!kelas) throw new Error('Kelas tidak ditemukan');
+  if (String(kelas.status || 'aktif') === 'nonaktif') throw new Error('Kelas sedang nonaktif');
+  if (u.role !== 'owner' && (!u.kode_kelas || String(u.kode_kelas) !== String(kodeKelas))) {
+    throw new Error('Akses ditolak: data kelas lain tidak dapat diakses');
+  }
+  return kelas;
+}
+
+function getStudentRecord(spreadsheetId, identifier, fieldName) {
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  var sh = ss.getSheetByName('siswa');
+  if (!sh) return null;
+  var list = sheetToObjects(sh);
+  return list.find(function (s) {
+    return String(s[fieldName] || '') === String(identifier || '') && String(s.status || 'aktif') !== 'nonaktif';
+  }) || null;
+}
+
+function getStudentForSession(u) {
+  if (u.role !== 'siswa') return null;
+  var student = getStudentRecord(u.spreadsheet_id, u.username, 'username');
+  if (!student) throw new Error('Data siswa tidak ditemukan pada kelas Anda');
+  return student;
+}
+
+function applyStudentIdentity(u, spreadsheetId, headers, obj) {
+  var nisIdx = headers.indexOf('nis');
+  var nameIdx = headers.indexOf('nama_siswa');
+  if (nisIdx === -1 && nameIdx === -1) return obj;
+
+  var student;
+  if (u.role === 'siswa') {
+    student = getStudentForSession(u);
+  } else if (obj.nis) {
+    student = getStudentRecord(spreadsheetId, obj.nis, 'nis');
+    if (!student) throw new Error('NIS tidak terdaftar pada kelas ini');
+  } else if (obj.username) {
+    student = getStudentRecord(spreadsheetId, obj.username, 'username');
+  }
+
+  if (student) {
+    if (nisIdx > -1) obj.nis = student.nis;
+    if (nameIdx > -1) obj.nama_siswa = student.nama;
+  }
+  return obj;
+}
+
+function isStudentRowOwned(u, row) {
+  if (u.role !== 'siswa') return true;
+  var identity = String(u.nis || u.username || '');
+  return String(row.nis || '') === identity || String(row.username || '') === String(u.username || '');
 }
 
 function canWriteSheet(u, spreadsheetId, sheetName) {
   if (u.role === 'owner') return true;
   if (u.role === 'admin_kelas' && u.spreadsheet_id === spreadsheetId) return true;
-  // FIX CRITICAL: Izinkan siswa mengisi modul di spreadsheet kelasnya
-  if (u.role === 'siswa' && u.spreadsheet_id === spreadsheetId) return true;
+  // Siswa boleh mengisi modul di kelasnya, tetapi tidak boleh mengubah roster siswa.
+  if (u.role === 'siswa' && u.spreadsheet_id === spreadsheetId && sheetName !== 'siswa') return true;
 
   var menus = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MENU, HEADERS.master_menu));
   return menus.some(function (m) {
@@ -91,6 +174,9 @@ function getSheetDataFn(token, spreadsheetId, sheetName) {
   var sh = ss.getSheetByName(sheetName);
   if (!sh) throw new Error('Sheet ' + sheetName + ' tidak ditemukan');
   var list = sheetToObjects(sh);
+  if (u.role === 'siswa') {
+    list = list.filter(function (r) { return isStudentRowOwned(u, r); });
+  }
   if (sheetName === 'siswa') list.forEach(function (r) { delete r.password_hash; });
   return list;
 }
@@ -103,12 +189,7 @@ function addRowToSheet(token, spreadsheetId, sheetName, obj) {
   var sh = ss.getSheetByName(sheetName);
   if (!sh) throw new Error('Sheet tidak ditemukan');
   var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  
-  // Otomatisasi data siswa jika diisi oleh siswa
-  if (u.role === 'siswa') {
-    if (headers.indexOf('nis') > -1 && !obj['nis']) obj['nis'] = u.username;
-    if (headers.indexOf('nama_siswa') > -1 && !obj['nama_siswa']) obj['nama_siswa'] = u.nama;
-  }
+  obj = applyStudentIdentity(u, spreadsheetId, headers, obj || {});
   
   var row = headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ''; });
   sh.appendRow(row);
@@ -123,7 +204,10 @@ function updateRowInSheet(token, spreadsheetId, sheetName, rowNumber, obj) {
   var sh = ss.getSheetByName(sheetName);
   var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   var current = sh.getRange(rowNumber, 1, 1, headers.length).getValues()[0];
-  
+  var currentObj = {};
+  headers.forEach(function (h, i) { currentObj[h] = current[i]; });
+  if (!isStudentRowOwned(u, currentObj)) throw new Error('Siswa hanya dapat mengubah data miliknya sendiri');
+  obj = applyStudentIdentity(u, spreadsheetId, headers, obj || {});
   var row = headers.map(function (h, idx) { return obj[h] !== undefined ? obj[h] : current[idx]; });
   sh.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
   return { message: 'Data berhasil diperbarui' };
@@ -135,6 +219,11 @@ function deleteRowFromSheet(token, spreadsheetId, sheetName, rowNumber) {
   if (!canWriteSheet(u, spreadsheetId, sheetName)) throw new Error('Tidak berwenang');
   var ss = SpreadsheetApp.openById(spreadsheetId);
   var sh = ss.getSheetByName(sheetName);
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var current = sh.getRange(rowNumber, 1, 1, headers.length).getValues()[0];
+  var currentObj = {};
+  headers.forEach(function (h, i) { currentObj[h] = current[i]; });
+  if (!isStudentRowOwned(u, currentObj)) throw new Error('Siswa hanya dapat menghapus data miliknya sendiri');
   sh.deleteRow(rowNumber);
   return { message: 'Data berhasil dihapus' };
 }
@@ -218,7 +307,8 @@ function saveModul(token, modulId, namaModul, keterangan, templateArr, isNew) {
 }
 
 function getActiveModulesForKelas(token, kodeKelas) {
-  requireAuth(token);
+  var u = requireAuth(token);
+  requireAuthorizedKelas(u, kodeKelas);
   var list = sheetToObjects(ensureSheet(getMasterSS(), SHEET_NAMES.MODUL_KELAS, HEADERS.master_modul_kelas));
   return list.filter(function (r) { return r.kode_kelas === kodeKelas; });
 }
@@ -226,12 +316,7 @@ function getActiveModulesForKelas(token, kodeKelas) {
 function activateModulForKelas(token, kodeKelas, modulId) {
   var u = requireRole(token, ['admin_kelas', 'owner']);
   var ss = getMasterSS();
-  var kelasList = sheetToObjects(ensureSheet(ss, SHEET_NAMES.KELAS, HEADERS.master_kelas));
-  var kelas = kelasList.find(function (k) { return k.kode_kelas === kodeKelas; });
-  if (!kelas) throw new Error('Kelas tidak ditemukan');
-  if (u.role === 'admin_kelas' && u.spreadsheet_id !== kelas.spreadsheet_id) {
-    throw new Error('Anda tidak berwenang untuk kelas ini');
-  }
+  var kelas = requireAuthorizedKelas(u, kodeKelas);
   if (!kelas.spreadsheet_id) throw new Error('Kelas ini belum memiliki spreadsheet_id, hubungi owner');
 
   var modulList = sheetToObjects(ensureSheet(ss, SHEET_NAMES.MODUL, HEADERS.master_modul));
