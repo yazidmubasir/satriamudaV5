@@ -601,6 +601,9 @@ function viewModulAktivasi(){
       </div>`;
     });
     document.getElementById('modul-aktivasi-list').innerHTML = html || '<p class="muted">Belum ada modul tersedia.</p>';
+  }).catch(e=>{
+    document.getElementById('modul-aktivasi-list').innerHTML = '<p class="muted">Gagal memuat modul. Silakan coba lagi.</p>';
+    toast(e.message||String(e), true);
   });
 }
 function submitActivateModul(modulId){
