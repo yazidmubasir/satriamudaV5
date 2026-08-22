@@ -209,6 +209,7 @@ function login(username, password) {
   var kelasList2 = sheetToObjects(kelasSh);
   for (var i = 0; i < kelasList2.length; i++) {
     var k = kelasList2[i];
+    if (String(k.status || 'aktif') === 'nonaktif') continue;
     if (!k.spreadsheet_id) continue;
     try {
       var kss = SpreadsheetApp.openById(k.spreadsheet_id);
@@ -217,21 +218,22 @@ function login(username, password) {
       var siswaList = sheetToObjects(siswaSh);
       var s = siswaList.find(function (x) { return String(x.username) === username && x.password_hash === hash && x.status !== 'nonaktif'; });
       if (s) {
-        return createSession(s.username, 'siswa', k.spreadsheet_id, s.nama || '', k.kode_kelas);
+        return createSession(s.username, 'siswa', k.spreadsheet_id, s.nama || '', k.kode_kelas, s.nis || '');
       }
     } catch (err) { continue; }
   }
   throw new Error('Username atau password salah');
 }
 
-function createSession(username, role, spreadsheetId, nama, kodeKelas) {
+function createSession(username, role, spreadsheetId, nama, kodeKelas, nis) {
   var token = Utilities.getUuid();
   var payload = {
     username: String(username),
     role: role,
     spreadsheet_id: spreadsheetId || '',
     nama: nama || '',
-    kode_kelas: kodeKelas || ''
+    kode_kelas: kodeKelas || '',
+    nis: nis || ''
   };
   CacheService.getScriptCache().put('sess_' + token, JSON.stringify(payload), 21600);
   return { token: token, user: payload };
@@ -298,7 +300,7 @@ function changePassword(token, oldPassword, newPassword) {
 
 // ================= MASTER CRUD DATA =================
 function getMasterList(token, sheetName) {
-  requireAuth(token);
+  requireOwner(token);
   var ss = getMasterSS();
   var sh = ensureSheet(ss, sheetName, HEADERS[sheetName]);
   var list = sheetToObjects(sh);
