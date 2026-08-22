@@ -275,8 +275,8 @@ function renderGenericCrud(config){
         <div class="record-count" id="crud-count">Memuat...</div>
       </div>
       <div class="crud-toolbar">
-        <div class="toolbar-hint">${config.readOnly ? 'Mode baca-saja' : 'Kelola data dengan aman dan teratur'}</div>
-        ${config.readOnly ? '' : `<button onclick='openCrudForm(${JSON.stringify(config.columns).replace(/'/g,"&#39;")}, null)'>＋ Tambah Data</button>`}
+        <div class="toolbar-hint">${config.readOnly ? 'Mode baca-saja' : (config.studentEntry ? 'Isi kegiatan lalu simpan ke sheet kegiatan.' : 'Kelola data dengan aman dan teratur')}</div>
+        ${config.allowAdd || (!config.readOnly && config.allowAdd !== false) ? `<button onclick='openCrudForm(${JSON.stringify(config.columns).replace(/'/g,"&#39;")}, null)'>${config.studentEntry ? '＋ Isi Kegiatan' : '＋ Tambah Data'}</button>` : ''}
       </div>
       <div class="table-scroll" id="crud-table-wrap"><div class="loading-state"><span class="loading-icon">⏳</span>Memuat data...</div></div>
     </div>
@@ -297,7 +297,7 @@ function renderCrudTableRows(config, rows){
   }
   let html = '<table><thead><tr>';
   config.columns.forEach(c=>{ if(c.type!=='password') html += `<th>${c.label}</th>`; });
-  if(!config.readOnly) html += '<th>Aksi</th>';
+  if(config.allowEdit || config.allowDelete || (!config.readOnly && config.allowEdit === undefined && config.allowDelete === undefined)) html += '<th>Aksi</th>';
   html += '</tr></thead><tbody>';
   rows.forEach((r,idx)=>{
     html += '<tr>';
@@ -307,11 +307,15 @@ function renderCrudTableRows(config, rows){
       if(v instanceof Date) v = v.toLocaleString();
       html += `<td>${escapeHtml(v!==undefined && v!==null ? String(v) : '')}</td>`;
     });
-    if(!config.readOnly){
-      html += `<td class="actions">
-        <button class="small secondary" onclick="openCrudFormEdit(${idx})">Edit</button>
-        <button class="small danger" onclick="confirmCrudDelete(${idx})">Hapus</button>
-      </td>`;
+    if(config.allowEdit || config.allowDelete || (!config.readOnly && config.allowEdit === undefined && config.allowDelete === undefined)){
+      html += '<td class="actions">';
+      if(config.allowEdit || (!config.readOnly && config.allowEdit === undefined)){
+        html += `<button class="small secondary" onclick="openCrudFormEdit(${idx})">Edit</button>`;
+      }
+      if(config.allowDelete || (!config.readOnly && config.allowDelete === undefined)){
+        html += `<button class="small danger" onclick="confirmCrudDelete(${idx})">Hapus</button>`;
+      }
+      html += '</td>';
     }
     html += '</tr>';
   });
@@ -325,7 +329,7 @@ function escapeHtml(value){
 }
 function openCrudForm(columns, existing){
   const config = window.__currentCrudConfig;
-  let html = `<h3>${existing ? 'Edit Data' : 'Tambah Data'}</h3>`;
+  let html = `<h3>${existing ? 'Edit Data' : (config.studentEntry ? 'Isi Kegiatan' : 'Tambah Data')}</h3>`;
   config.columns.forEach(c=>{
     const val = existing ? (existing[c.key] !== undefined ? existing[c.key] : '') : '';
     html += `<label>${c.label}</label>`;
@@ -336,6 +340,10 @@ function openCrudForm(columns, existing){
       html += `</select>`;
     } else if(c.type === 'password'){
       html += `<input type="password" id="cf-${c.key}" placeholder="${existing ? 'kosongkan jika tidak diubah' : ''}">`;
+    } else if(/tanggal|date/i.test(c.key)){
+      html += `<input type="date" id="cf-${c.key}" value="${val}">`;
+    } else if(/keterangan|catatan|resume|ringkasan|deskripsi|alamat/i.test(c.key)){
+      html += `<textarea id="cf-${c.key}" rows="3">${val}</textarea>`;
     } else if(c.readonlyOnEdit && existing){
       html += `<input id="cf-${c.key}" value="${val}" disabled>`;
     } else {
@@ -344,7 +352,7 @@ function openCrudForm(columns, existing){
   });
   html += `<div style="margin-top:14px;text-align:right">
     <button class="secondary" onclick="closeModal()">Batal</button>
-    <button onclick="submitCrudForm(${existing ? JSON.stringify(existing.__pk).replace(/'/g,"&#39;") : 'null'})">Simpan</button>
+    <button onclick="submitCrudForm(${existing ? JSON.stringify(existing.__pk).replace(/'/g,"&#39;") : 'null'})">${config.studentEntry ? 'Simpan Kegiatan' : 'Simpan'}</button>
   </div>`;
   showModal(html);
 }
@@ -510,8 +518,12 @@ function viewKelasSheetData(spreadsheetId, sheetName, title){
     const cols = headers.map(h=>({key:h,label:h}));
     renderGenericCrud({
       title: title || sheetName, columns: cols, pkField:'__row', module:true,
-      note: USER.role === 'siswa' ? 'Data modul ini hanya dapat dibaca.' : 'Kelola data kegiatan kelas melalui tabel di bawah.',
-      readOnly: USER.role === 'siswa',
+      note: USER.role === 'siswa' ? 'Isi kegiatan harian Anda melalui tombol di bawah. Data akan disimpan ke sheet kegiatan ini.' : 'Kelola data kegiatan kelas melalui tabel di bawah.',
+      readOnly: false,
+      studentEntry: USER.role === 'siswa',
+      allowAdd: true,
+      allowEdit: USER.role !== 'siswa',
+      allowDelete: USER.role !== 'siswa',
       load: ()=> call('getSheetDataFn',[TOKEN, spreadsheetId, sheetName]),
       onAdd: (obj)=> call('addRowToSheet',[TOKEN, spreadsheetId, sheetName, obj]),
       onUpdate: (pk,obj)=> call('updateRowInSheet',[TOKEN, spreadsheetId, sheetName, pk, obj]),
