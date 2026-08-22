@@ -651,6 +651,37 @@ function getActiveModulesForKelas(token, kodeKelas) {
   return list.filter(function (r) { return r.kode_kelas === kodeKelas; });
 }
 
+// Modul yang sudah diaktifkan admin kelas dan boleh dilihat oleh siswa kelas tersebut.
+function getModulesForUser(token) {
+  var u = requireRole(token, ['siswa', 'admin_kelas']);
+  if (!u.kode_kelas) return [];
+
+  var ss = getMasterSS();
+  var activeRows = makeClientSafeRows(
+    sheetToObjects(ensureSheet(ss, SHEET_NAMES.MODUL_KELAS, HEADERS.master_modul_kelas))
+  ).filter(function (row) {
+    return row.kode_kelas === u.kode_kelas && row.status_aktif === 'aktif';
+  });
+
+  var activeIds = {};
+  activeRows.forEach(function (row) { activeIds[row.modul_id] = true; });
+
+  return makeClientSafeRows(
+    sheetToObjects(ensureSheet(ss, SHEET_NAMES.MODUL, HEADERS.master_modul))
+  ).filter(function (modul) {
+    return activeIds[modul.modul_id] && modul.status === 'aktif';
+  }).map(function (modul) {
+    var template = JSON.parse(modul.template_json || '[]');
+    return {
+      modul_id: modul.modul_id,
+      nama_modul: modul.nama_modul,
+      sheets: template.map(function (sheet) {
+        return { sheet_name: sheet.sheet_name, title: sheet.sheet_name };
+      })
+    };
+  });
+}
+
 function activateModulForKelas(token, kodeKelas, modulId) {
   var u = requireRole(token, ['admin_kelas', 'owner']);
   var ss = getMasterSS();
