@@ -1,0 +1,577 @@
+<script>
+/**
+ * ============================================================
+ * GENERIC MODULE & CRUD FRONTEND ENGINE
+ * ============================================================
+ */
+
+const MASTER_FIELD_CONFIG = {
+  master_users: {
+    title: '👥 Master Users',
+    note: 'Daftar pengguna terdaftar di sistem master.',
+    pkField: 'username',
+    columns: [
+      { key: 'username', label: 'Username', readonlyOnEdit: true },
+      { key: 'password', label: 'Password', type: 'password', hint: 'Kosongkan jika tidak diubah' },
+      { key: 'role', label: 'Role', type: 'select', options: ['owner', 'guru', 'karyawan', 'admin_kelas'] },
+      { key: 'nama_lengkap', label: 'Nama Lengkap' },
+      { key: 'spreadsheet_id', label: 'Spreadsheet ID' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] },
+      { key: 'created_at', label: 'Tanggal Dibuat', readonlyOnEdit: true }
+    ]
+  },
+  master_guru: {
+    title: '👨‍🏫 Master Guru', pkField: 'nip',
+    columns: [
+      { key: 'nip', label: 'NIP', readonlyOnEdit: true },
+      { key: 'nama', label: 'Nama' },
+      { key: 'mapel', label: 'Mapel Diampu' },
+      { key: 'no_hp', label: 'No HP' },
+      { key: 'alamat', label: 'Alamat' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ]
+  },
+  master_karyawan: {
+    title: '👔 Master Karyawan', pkField: 'nip',
+    columns: [
+      { key: 'nip', label: 'NIP/NIK', readonlyOnEdit: true },
+      { key: 'nama', label: 'Nama' },
+      { key: 'jabatan', label: 'Jabatan' },
+      { key: 'no_hp', label: 'No HP' },
+      { key: 'alamat', label: 'Alamat' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ]
+  },
+  master_kelas: {
+    title: '🏫 Master Kelas', pkField: 'kode_kelas',
+    columns: [
+      { key: 'kode_kelas', label: 'Kode Kelas', readonlyOnEdit: true },
+      { key: 'nama_kelas', label: 'Nama Kelas' },
+      { key: 'wali_kelas', label: 'Wali Kelas' },
+      { key: 'spreadsheet_id', label: 'Spreadsheet ID' },
+      { key: 'admin_kelas_username', label: 'Admin Kelas' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ]
+  },
+  master_mapel: {
+    title: '📚 Master Mapel', pkField: 'kode_mapel',
+    columns: [
+      { key: 'kode_mapel', label: 'Kode Mapel', readonlyOnEdit: true },
+      { key: 'nama_mapel', label: 'Nama Mapel' },
+      { key: 'guru_pengampu', label: 'Guru Pengampu' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ]
+  }
+};
+
+function viewMasterCrud(sheetName) {
+  const fc = MASTER_FIELD_CONFIG[sheetName];
+  renderGenericCrud({
+    title: fc.title, note: fc.note, columns: fc.columns, pkField: fc.pkField,
+    readOnly: USER.role !== 'owner',
+    load: () => call('getMasterList', [TOKEN, sheetName]),
+    onAdd: (obj) => call('addMasterRow', [TOKEN, sheetName, obj]),
+    onUpdate: (pk, obj) => call('updateMasterRow', [TOKEN, sheetName, pk, obj]),
+    onDelete: (pk) => call('deleteMasterRow', [TOKEN, sheetName, pk])
+  });
+}
+
+function viewDynamicMenu(menuId) {
+  call('getMenusForUser', [TOKEN]).then(menus => {
+    const m = menus.find(x => x.menu_id === menuId);
+    if (!m) return toast('Menu tidak ditemukan', true);
+
+    if (m.target_type === 'master') {
+      viewMasterCrud(m.sheet_name);
+    } else {
+      if (!USER.spreadsheet_id) return toast('Anda belum terhubung ke spreadsheet kelas manapun', true);
+      viewKelasSheetData(USER.spreadsheet_id, m.sheet_name, m.nama_menu);
+    }
+  });
+}
+
+function viewKelasSheetData(spreadsheetId, sheetName, title) {
+  call('getSheetHeadersFn', [TOKEN, spreadsheetId, sheetName]).then(headers => {
+    const cols = headers.map(h => ({ key: h, label: h.replace(/_/g, ' ').toUpperCase() }));
+    renderGenericCrud({
+      title: title || sheetName,
+      columns: cols,
+      pkField: '__row',
+      isModule: true,
+      load: () => call('getSheetDataFn', [TOKEN, spreadsheetId, sheetName]),
+      onAdd: (obj) => call('addRowToSheet', [TOKEN, spreadsheetId, sheetName, obj]),
+      onUpdate: (pk, obj) => call('updateRowInSheet', [TOKEN, spreadsheetId, sheetName, pk, obj]),
+      onDelete: (pk) => call('deleteRowFromSheet', [TOKEN, spreadsheetId, sheetName, pk])
+    });
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+// RENDER ELEGAN TABEL & MODAL
+function renderGenericCrud(config) {
+  const content = document.getElementById('content');
+  content.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 class="page-title">${config.title}</h2>
+          ${config.note ? `<p class="muted" style="margin:4px 0 0">${config.note}</p>` : ''}
+        </div>
+        ${config.readOnly ? '' : `<button onclick='openCrudFormModal(null)'>➕ Tambah Data Baru</button>`}
+      </div>
+      
+      <div style="margin-top:16px;display:flex;gap:10px">
+        <input id="crud-search" placeholder="🔍 Cari data..." onkeyup="filterCrudTable()" style="max-width:300px">
+      </div>
+
+      <div id="crud-table-wrap" class="table-responsive">
+        <p class="muted" style="padding:16px">Memuat data...</p>
+      </div>
+    </div>
+  `;
+  window.__currentCrudConfig = config;
+  config.load().then(rows => {
+    window.__currentCrudRows = rows;
+    renderCrudTableRows(config, rows);
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function renderCrudTableRows(config, rows) {
+  const wrap = document.getElementById('crud-table-wrap');
+  if (!rows.length) { 
+    wrap.innerHTML = '<p class="muted" style="padding:16px">Belum ada data tercatat.</p>'; 
+    return; 
+  }
+
+  let html = '<table><thead><tr>';
+  config.columns.forEach(c => { if (c.type !== 'password') html += `<th>${c.label}</th>`; });
+  if (!config.readOnly) html += '<th>Aksi</th>';
+  html += '</tr></thead><tbody>';
+
+  rows.forEach((r, idx) => {
+    html += '<tr>';
+    config.columns.forEach(c => {
+      if (c.type === 'password') return;
+      let v = r[c.key];
+      let displayHtml = v !== undefined && v !== null ? v : '';
+
+      // Badging Otomatis untuk Ya/Tidak
+      if (String(v).toLowerCase() === 'ya') {
+        displayHtml = `<span class="badge badge-success">Ya</span>`;
+      } else if (String(v).toLowerCase() === 'tidak') {
+        displayHtml = `<span class="badge badge-danger">Tidak</span>`;
+      } else if (String(v).toLowerCase() === 'aktif') {
+        displayHtml = `<span class="badge badge-success">Aktif</span>`;
+      } else if (String(v).toLowerCase() === 'nonaktif') {
+        displayHtml = `<span class="badge badge-danger">Nonaktif</span>`;
+      }
+
+      html += `<td>${displayHtml}</td>`;
+    });
+
+    if (!config.readOnly) {
+      html += `<td style="white-space:nowrap">
+        <button class="small secondary" onclick="openCrudFormEdit(${idx})">✏️ Edit</button>
+        <button class="small danger" onclick="confirmCrudDelete(${idx})">🗑️ Hapus</button>
+      </td>`;
+    }
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function filterCrudTable() {
+  const q = document.getElementById('crud-search').value.toLowerCase();
+  const rows = window.__currentCrudRows || [];
+  const filtered = rows.filter(r => {
+    return Object.values(r).some(val => String(val).toLowerCase().includes(q));
+  });
+  renderCrudTableRows(window.__currentCrudConfig, filtered);
+}
+
+// MODAL ELEGAN UNTUK SISWA & USER
+function openCrudFormModal(existing) {
+  const config = window.__currentCrudConfig;
+  let html = `<h3>${existing ? '✏️ Edit Data' : '➕ Tambah Data Baru'}</h3>`;
+  
+  config.columns.forEach(c => {
+    let val = existing ? (existing[c.key] !== undefined ? existing[c.key] : '') : '';
+    
+    // Auto fill data siswa
+    if (!existing && USER.role === 'siswa') {
+      if (c.key === 'nis') val = USER.username;
+      if (c.key === 'nama_siswa' || c.key === 'nama') val = USER.nama;
+    }
+    if (!existing && c.key === 'tanggal' && !val) {
+      val = new Date().toISOString().split('T')[0];
+    }
+
+    html += `<label>${c.label}</label>`;
+    if (c.hint) html += `<div class="hint">${c.hint}</div>`;
+
+    // SMART INPUT CONTROLS
+    const isBinaryOption = ['ya', 'tidak'].includes(String(val).toLowerCase()) || 
+                           ['bangun_pagi','beribadah','berolahraga','makan_sehat','gemar_belajar','bermasyarakat','tidur_cepat','paraf_ortu'].includes(c.key);
+
+    if (isBinaryOption) {
+      const currentVal = (val || 'Ya').toString().toLowerCase();
+      html += `
+        <input type="hidden" id="cf-${c.key}" value="${currentVal === 'tidak' ? 'Tidak' : 'Ya'}">
+        <div class="toggle-group">
+          <div class="toggle-btn ${currentVal !== 'tidak' ? 'active-ya' : ''}" id="tg-ya-${c.key}" onclick="setToggleValue('${c.key}', 'Ya')">Ya</div>
+          <div class="toggle-btn ${currentVal === 'tidak' ? 'active-tidak' : ''}" id="tg-tidak-${c.key}" onclick="setToggleValue('${c.key}', 'Tidak')">Tidak</div>
+        </div>
+      `;
+    } else if (c.type === 'select') {
+      html += `<select id="cf-${c.key}">`;
+      (c.options || []).forEach(o => { html += `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`; });
+      html += `</select>`;
+    } else if (c.type === 'password') {
+      html += `<input type="password" id="cf-${c.key}" placeholder="${existing ? 'Kosongkan jika tidak diubah' : ''}">`;
+    } else if (c.key.includes('tanggal')) {
+      html += `<input type="date" id="cf-${c.key}" value="${val}">`;
+    } else if (c.key.includes('ringkasan') || c.key.includes('keterangan') || c.key.includes('resume') || c.key.includes('alamat')) {
+      html += `<textarea id="cf-${c.key}" rows="3">${val}</textarea>`;
+    } else if (c.readonlyOnEdit && existing) {
+      html += `<input id="cf-${c.key}" value="${val}" disabled>`;
+    } else {
+      html += `<input id="cf-${c.key}" value="${val}">`;
+    }
+  });
+
+  html += `<div style="margin-top:20px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+    <button class="secondary" onclick="closeModal()">Batal</button>
+    <button onclick="submitCrudFormModal(${existing ? JSON.stringify(existing.__pk).replace(/'/g, "&#39;") : 'null'})">Simpan Data</button>
+  </div>`;
+
+  showModal(html);
+}
+
+function setToggleValue(key, val) {
+  document.getElementById('cf-' + key).value = val;
+  const yaBtn = document.getElementById('tg-ya-' + key);
+  const tidakBtn = document.getElementById('tg-tidak-' + key);
+  if (val === 'Ya') {
+    yaBtn.className = 'toggle-btn active-ya';
+    tidakBtn.className = 'toggle-btn';
+  } else {
+    yaBtn.className = 'toggle-btn';
+    tidakBtn.className = 'toggle-btn active-tidak';
+  }
+}
+
+function openCrudFormEdit(idx) {
+  const rows = window.__currentCrudRows;
+  const config = window.__currentCrudConfig;
+  const r = rows[idx];
+  r.__pk = config.pkField === '__row' ? r.__row : r[config.pkField];
+  openCrudFormModal(r);
+}
+
+function submitCrudFormModal(pk) {
+  const config = window.__currentCrudConfig;
+  const obj = {};
+  config.columns.forEach(c => {
+    const el = document.getElementById('cf-' + c.key);
+    if (!el) return;
+    if (c.type === 'password' && !el.value) return;
+    obj[c.key] = el.value;
+  });
+
+  const promise = (pk === null || pk === undefined) ? config.onAdd(obj) : config.onUpdate(pk, obj);
+  promise.then(res => {
+    toast(res.message); closeModal();
+    config.load().then(rows => { window.__currentCrudRows = rows; renderCrudTableRows(config, rows); });
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function confirmCrudDelete(idx) {
+  if (!confirm('Yakin ingin menghapus data ini?')) return;
+  const config = window.__currentCrudConfig;
+  const rows = window.__currentCrudRows;
+  const r = rows[idx];
+  const pk = config.pkField === '__row' ? r.__row : r[config.pkField];
+  config.onDelete(pk).then(res => {
+    toast(res.message);
+    config.load().then(rows2 => { window.__currentCrudRows = rows2; renderCrudTableRows(config, rows2); });
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+// FITUR MANAJER TAMBAHAN (Admin Kelas & Owner)
+function viewSiswaManager() {
+  renderGenericCrud({
+    title: '🎓 Data Siswa Kelas Saya',
+    note: 'Kelola akun login dan data siswa untuk kelas ini.',
+    pkField: '__row',
+    columns: [
+      { key: 'nis', label: 'NIS' },
+      { key: 'nama', label: 'Nama Lengkap' },
+      { key: 'username', label: 'Username Login' },
+      { key: 'password', label: 'Password', type: 'password', hint: 'Default: 123456 jika dikosongkan' },
+      { key: 'jenis_kelamin', label: 'L/P', type: 'select', options: ['L', 'P'] },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ],
+    load: () => call('getSiswaList', [TOKEN, USER.spreadsheet_id]),
+    onAdd: (obj) => call('addSiswa', [TOKEN, USER.spreadsheet_id, obj]),
+    onUpdate: (pk, obj) => call('updateSiswa', [TOKEN, USER.spreadsheet_id, pk, obj]),
+    onDelete: (pk) => call('deleteSiswa', [TOKEN, USER.spreadsheet_id, pk])
+  });
+}
+
+function viewMenuManager() {
+  renderGenericCrud({
+    title: '📌 Manajemen Menu Sistem',
+    note: 'Pengaturan navigasi dinamis sidebar berdasarkan role.',
+    pkField: 'menu_id',
+    columns: [
+      { key: 'menu_id', label: 'Menu ID', readonlyOnEdit: true },
+      { key: 'nama_menu', label: 'Nama Menu' },
+      { key: 'icon', label: 'Emoji Icon' },
+      { key: 'urutan', label: 'Urutan' },
+      { key: 'role_akses', label: 'Role Akses (contoh: siswa,guru,admin_kelas)' },
+      { key: 'target_type', label: 'Target', type: 'select', options: ['master', 'kelas'] },
+      { key: 'sheet_name', label: 'Nama Sheet Target' },
+      { key: 'status', label: 'Status', type: 'select', options: ['aktif', 'nonaktif'] }
+    ],
+    load: () => call('getMasterList', [TOKEN, 'master_menu']),
+    onAdd: (obj) => call('addMasterRow', [TOKEN, 'master_menu', obj]),
+    onUpdate: (pk, obj) => call('updateMasterRow', [TOKEN, 'master_menu', pk, obj]),
+    onDelete: (pk) => call('deleteMasterRow', [TOKEN, 'master_menu', pk])
+  });
+}
+
+function viewAdminKelasManager() {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="card"><h2 class="page-title">🔗 Pengaturan Admin Kelas & Spreadsheet</h2>
+    <p class="muted">Tentukan Admin Kelas dan Spreadsheet ID untuk masing-masing kelas.</p>
+    <div id="ak-form"></div>
+    <h3 style="margin-top:20px">Daftar Kelas</h3>
+    <div id="ak-table"><p class="muted">Memuat...</p></div>
+  </div>`;
+
+  Promise.all([
+    call('getMasterList', [TOKEN, 'master_kelas']),
+    call('getUsersForAssign', [TOKEN])
+  ]).then(([kelasList, users]) => {
+    let opts1 = kelasList.map(k => `<option value="${k.kode_kelas}">${k.kode_kelas} - ${k.nama_kelas}</option>`).join('');
+    let opts2 = users.map(u => `<option value="${u.username}">${u.username} (${u.role})</option>`).join('');
+    document.getElementById('ak-form').innerHTML = `
+      <div class="flexrow">
+        <div><label>Kelas</label><select id="ak-kelas">${opts1}</select></div>
+        <div><label>Username Admin</label><select id="ak-user">${opts2}</select></div>
+        <div><label>Spreadsheet ID Kelas</label><input id="ak-sid" placeholder="Spreadsheet ID Google Sheet"></div>
+        <div><button onclick="submitAssignAdminKelas()">Simpan Pengaturan</button></div>
+      </div>`;
+    let rows = '<div class="table-responsive"><table><thead><tr><th>Kode</th><th>Nama Kelas</th><th>Spreadsheet ID</th><th>Admin Kelas</th></tr></thead><tbody>';
+    kelasList.forEach(k => { rows += `<tr><td>${k.kode_kelas}</td><td>${k.nama_kelas}</td><td>${k.spreadsheet_id || '-'}</td><td>${k.admin_kelas_username || '-'}</td></tr>`; });
+    rows += '</tbody></table></div>';
+    document.getElementById('ak-table').innerHTML = rows;
+  });
+}
+
+function submitAssignAdminKelas() {
+  const kelas = document.getElementById('ak-kelas').value;
+  const user = document.getElementById('ak-user').value;
+  const sid = document.getElementById('ak-sid').value.trim();
+  if (!sid) return toast('Spreadsheet ID wajib diisi', true);
+  call('assignAdminKelas', [TOKEN, kelas, user, sid]).then(res => {
+    toast(res.message); viewAdminKelasManager();
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function viewModulManager() {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="card">
+    <h2 class="page-title">🧩 Modul Kegiatan (Builder)</h2>
+    <p class="muted">Desain skema tabel dan kolom kegiatan untuk diaktifkan di kelas.</p>
+    <button onclick="openModulEditor(null)">➕ Buat Modul Baru</button>
+    <div id="modul-list" style="margin-top:16px"><p class="muted">Memuat...</p></div>
+  </div>`;
+  call('listModulesAll', [TOKEN]).then(list => {
+    let html = '';
+    list.forEach(m => {
+      html += `<div class="card" style="box-shadow:none;border:1px solid var(--border)">
+        <strong>${m.nama_modul}</strong> <span class="badge badge-neutral">${m.modul_id}</span>
+        <p class="muted" style="margin:4px 0 10px">${m.keterangan}</p>
+        <button class="small secondary" onclick='openModulEditor(${JSON.stringify(m).replace(/'/g, "&#39;")})'>✏️ Edit Skema Modul</button>
+      </div>`;
+    });
+    document.getElementById('modul-list').innerHTML = html || '<p class="muted">Belum ada modul.</p>';
+  });
+}
+
+let __modulSheets = [];
+function openModulEditor(existing) {
+  __modulSheets = existing ? JSON.parse(existing.template_json) : [{ sheet_name: '', columns: [{ name: '', note: '' }] }];
+  showModal(`
+    <h3>${existing ? '✏️ Edit Modul' : '➕ Buat Modul Baru'}</h3>
+    <label>Modul ID</label><input id="mm-id" value="${existing ? existing.modul_id : ''}" ${existing ? 'disabled' : ''} placeholder="MODUL_PEMBIASAAN">
+    <label>Nama Modul</label><input id="mm-nama" value="${existing ? existing.nama_modul : ''}">
+    <label>Keterangan</label><textarea id="mm-ket" rows="2">${existing ? existing.keterangan : ''}</textarea>
+    <h4>Sheet & Skema Kolom</h4>
+    <div id="mm-sheets"></div>
+    <button class="small secondary" onclick="addModulSheetBlock()">➕ Tambah Sheet</button>
+    <div style="margin-top:20px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+      <button class="secondary" onclick="closeModal()">Batal</button>
+      <button onclick="submitModul(${existing ? 'true' : 'false'})">Simpan Modul</button>
+    </div>
+  `);
+  renderModulSheetBlocks();
+}
+
+function renderModulSheetBlocks() {
+  let html = '';
+  __modulSheets.forEach((s, si) => {
+    html += `<div style="border:1px dashed var(--border);padding:12px;border-radius:8px;margin-bottom:12px">
+      <label>Nama Sheet (Contoh: TRX_KEBIASAAN)</label>
+      <input value="${s.sheet_name}" onchange="__modulSheets[${si}].sheet_name=this.value">
+      <div id="mm-cols-${si}"></div>
+      <button class="small secondary" onclick="addModulColumn(${si})">➕ Tambah Kolom</button>
+    </div>`;
+  });
+  document.getElementById('mm-sheets').innerHTML = html;
+  __modulSheets.forEach((s, si) => renderModulColumns(si));
+}
+
+function renderModulColumns(si) {
+  const wrap = document.getElementById('mm-cols-' + si);
+  let html = '';
+  __modulSheets[si].columns.forEach((c, ci) => {
+    html += `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <input placeholder="nama_kolom" value="${c.name}" onchange="__modulSheets[${si}].columns[${ci}].name=this.value" style="flex:1;margin:0">
+      <button class="small danger" onclick="removeModulColumn(${si},${ci})">x</button>
+    </div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function addModulSheetBlock() { __modulSheets.push({ sheet_name: '', columns: [{ name: '', note: '' }] }); renderModulSheetBlocks(); }
+function addModulColumn(si) { __modulSheets[si].columns.push({ name: '', note: '' }); renderModulColumns(si); }
+function removeModulColumn(si, ci) { __modulSheets[si].columns.splice(ci, 1); renderModulColumns(si); }
+
+function submitModul(isEdit) {
+  const id = document.getElementById('mm-id').value.trim();
+  const nama = document.getElementById('mm-nama').value.trim();
+  const ket = document.getElementById('mm-ket').value.trim();
+  if (!id || !nama) return toast('Modul ID dan Nama wajib diisi', true);
+  call('saveModul', [TOKEN, id, nama, ket, __modulSheets, !isEdit]).then(res => {
+    toast(res.message); closeModal(); viewModulManager();
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function viewModulAktivasi() {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="card"><h2 class="page-title">🚀 Aktivasi Modul Kegiatan</h2>
+    <p class="muted">Aktifkan modul kegiatan agar sheet otomatis dibuat di spreadsheet kelas Anda.</p>
+    <div id="modul-aktivasi-list"><p class="muted">Memuat...</p></div>
+  </div>`;
+  Promise.all([
+    call('listModulesForActivation', [TOKEN]),
+    call('getActiveModulesForKelas', [TOKEN, USER.kode_kelas])
+  ]).then(([modules, actives]) => {
+    let html = '';
+    modules.forEach(m => {
+      const active = actives.find(a => a.modul_id === m.modul_id && a.status_aktif === 'aktif');
+      html += `<div class="card" style="box-shadow:none;border:1px solid var(--border)">
+        <strong>${m.nama_modul}</strong> ${active ? '<span class="badge badge-success">Sudah Aktif</span>' : ''}
+        <p class="muted" style="margin:4px 0 10px">${m.keterangan}</p>
+        <button onclick="submitActivateModul('${m.modul_id}')">${active ? '🔄 Perbarui Sheet' : '⚡ Aktifkan untuk Kelas Saya'}</button>
+      </div>`;
+    });
+    document.getElementById('modul-aktivasi-list').innerHTML = html || '<p class="muted">Belum ada modul tersedia.</p>';
+  });
+}
+
+function submitActivateModul(modulId) {
+  call('activateModulForKelas', [TOKEN, USER.kode_kelas, modulId]).then(res => {
+    toast(res.message); viewModulAktivasi();
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function viewSheetBuilder() {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="card">
+    <h2 class="page-title">🛠️ Kelola Sheet & Kolom Manual</h2>
+    <div id="sb-select"></div>
+    <div id="sb-sheets" style="margin-top:14px"></div>
+  </div>`;
+  if (USER.role === 'owner') {
+    call('listAllKelasSpreadsheets', [TOKEN]).then(list => {
+      let opts = list.filter(k => k.spreadsheet_id).map(k => `<option value="${k.spreadsheet_id}">${k.kode_kelas} - ${k.nama_kelas}</option>`).join('');
+      document.getElementById('sb-select').innerHTML = `<label>Pilih Kelas Target</label><select id="sb-sid" onchange="loadSheetBuilderSheets(this.value)"><option value="">-- Pilih --</option>${opts}</select>`;
+    });
+  } else {
+    loadSheetBuilderSheets(USER.spreadsheet_id);
+  }
+}
+
+function loadSheetBuilderSheets(spreadsheetId) {
+  if (!spreadsheetId) return;
+  call('listSpreadsheetSheets', [TOKEN, spreadsheetId]).then(sheets => {
+    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    sheets.forEach(s => {
+      html += `<button class="secondary small" onclick="openManageColumns('${spreadsheetId}','${s}')">📑 ${s}</button>`;
+    });
+    html += '</div><div id="sb-cols" style="margin-top:16px"></div>';
+    document.getElementById('sb-sheets').innerHTML = html;
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function openManageColumns(spreadsheetId, sheetName) {
+  call('getSheetHeadersFn', [TOKEN, spreadsheetId, sheetName]).then(headers => {
+    let html = `<div class="card" style="box-shadow:none;border:1px solid var(--border)">
+      <h3>Kolom Sheet: ${sheetName}</h3><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">`;
+    headers.forEach(h => {
+      html += `<span class="badge badge-neutral">${h} <a href="#" style="color:var(--danger);margin-left:4px" onclick="removeColumn('${spreadsheetId}','${sheetName}','${h}');return false;">✕</a></span>`;
+    });
+    html += `</div>
+      <div class="flexrow">
+        <div><input id="newcol-name" placeholder="nama_kolom_baru"></div>
+        <div><button onclick="addColumnSubmit('${spreadsheetId}','${sheetName}')">Tambah Kolom</button></div>
+      </div>
+    </div>`;
+    document.getElementById('sb-cols').innerHTML = html;
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function addColumnSubmit(spreadsheetId, sheetName) {
+  const col = document.getElementById('newcol-name').value.trim();
+  if (!col) return toast('Nama kolom wajib diisi', true);
+  call('addColumnToSheetFn', [TOKEN, spreadsheetId, sheetName, col]).then(res => {
+    toast(res.message); openManageColumns(spreadsheetId, sheetName);
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function removeColumn(spreadsheetId, sheetName, col) {
+  if (!confirm('Hapus kolom "' + col + '"? Data pada kolom ini akan hilang.')) return;
+  call('deleteColumnFromSheetFn', [TOKEN, spreadsheetId, sheetName, col]).then(res => {
+    toast(res.message); openManageColumns(spreadsheetId, sheetName);
+  }).catch(e => toast(e.message || String(e), true));
+}
+
+function viewAggregasi() {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="card">
+    <h2 class="page-title">📊 Agregasi Data Semua Kelas</h2>
+    <div class="flexrow">
+      <div><input id="agg-sheet" placeholder="Nama sheet (contoh: TRX_7KAIH)"></div>
+      <div><button onclick="submitAggregasi()">Tampilkan Agregasi</button></div>
+    </div>
+    <div id="agg-result" class="table-responsive" style="margin-top:16px"></div>
+  </div>`;
+}
+
+function submitAggregasi() {
+  const sheetName = document.getElementById('agg-sheet').value.trim();
+  if (!sheetName) return toast('Nama sheet wajib diisi', true);
+  call('aggregateSheetAcrossKelas', [TOKEN, sheetName]).then(rows => {
+    if (!rows.length) { document.getElementById('agg-result').innerHTML = '<p class="muted" style="padding:16px">Tidak ada data ditemukan.</p>'; return; }
+    const keys = Object.keys(rows[0]).filter(k => k !== '__row');
+    let html = '<table><thead><tr>' + keys.map(k => `<th>${k}</th>`).join('') + '</tr></thead><tbody>';
+    rows.forEach(r => { html += '<tr>' + keys.map(k => `<td>${r[k] !== undefined && r[k] !== null ? r[k] : ''}</td>`).join('') + '</tr>'; });
+    html += '</tbody></table>';
+    document.getElementById('agg-result').innerHTML = html;
+  }).catch(e => toast(e.message || String(e), true));
+}
+</script>
